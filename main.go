@@ -7,16 +7,16 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 type jwtServer struct {
@@ -50,39 +50,38 @@ type handler struct {
 	Public  jwtPublicKey
 }
 
-func (h handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	if req.Method != "GET" {
-		rw.WriteHeader(http.StatusMethodNotAllowed)
-		rw.Write([]byte(`{"message": "Method Not Allowed"}`))
+func (h handler) ServeHTTP(c *gin.Context) {
+	if c.Request.Method != "GET" {
+		c.JSON(http.StatusMethodNotAllowed,
+			gin.H{"message": "Method Not Allowed"})
 		return
 	}
-	pathfrags := strings.Split(req.URL.Path, "/")
-	fmt.Printf("%q\n", pathfrags)
+
+	pathfrags := strings.Split(c.Request.URL.Path, "/")
 	if len(pathfrags) <= 1 {
-		rw.WriteHeader(http.StatusNotFound)
-		rw.Write([]byte(`{"message": "Not Found"}`))
+		c.JSON(http.StatusNotFound, gin.H{"message": "Not Found"})
 		return
 	}
 	if pathfrags[1] != ".well-known" {
-		rw.WriteHeader(http.StatusNotFound)
-		rw.Write([]byte(`{"message": "Not Found"}`))
+		c.JSON(http.StatusNotFound,
+			gin.H{"message": "Not Found"})
 		return
 	}
 	if len(pathfrags) <= 2 {
-		rw.WriteHeader(http.StatusNotFound)
-		rw.Write([]byte(`{"message": "Not Found"}`))
+		c.JSON(http.StatusNotFound, gin.H{"message": "Not Found"})
 		return
 	}
+
 	switch pathfrags[2] {
 	case "openid-configuration":
 		server := jwtServer{
-			AuthorizationEndpoint: fmt.Sprintf("https://%s", req.Header["Host"]),
+			AuthorizationEndpoint: fmt.Sprintf("https://%s", c.Request.Host),
 			IdTokenSigningAlgValuesSupported: []string{
 				"RS512",
 			},
-			Issuer:  fmt.Sprintf("https://%s", req.Header["Host"]),
-			JwksURI: fmt.Sprintf("https://%s/.well-known/jwks_uri", req.Header["Host"]),
-			ResponseTypeSupported: []string{
+			Issuer:  fmt.Sprintf("https://%s", c.Request.Host),
+			JwksURI: fmt.Sprintf("https://%s/.well-known/jwks_uri", c.Request.Host),
+			ResponseTypesSupported: []string{
 				"code",
 				"id_token",
 				"token id_token",
@@ -91,18 +90,11 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			SubjectTypesSupported: []string{
 				"public",
 			},
-			TokenEndpoint: fmt.Sprintf("https://%s", req.Header["Host"]),
+			TokenEndpoint: fmt.Sprintf("https://%s", c.Request.Host),
 			Version:       "version",
-			X509URL:       fmt.Sprintf("https://%s", req.Header["Host"]),
+			X509URL:       fmt.Sprintf("https://%s", c.Request.Host),
 		}
-		resp, err := json.Marshal(&server)
-		if err != nil {
-			rw.WriteHeader(http.StatusInternalServerError)
-			rw.Write([]byte("Server Error"))
-			return
-		}
-		rw.WriteHeader(http.StatusOK)
-		rw.Write(resp)
+		c.JSON(http.StatusOK, server)
 		return
 	case "jwks_uri":
 		keys := struct {
@@ -112,15 +104,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 				h.Public,
 			},
 		}
-		resp, err := json.Marshal(keys)
-		if err != nil {
-			rw.WriteHeader(http.StatusInternalServerError)
-			rw.Write([]byte("Server Error"))
-			return
-		}
-		rw.WriteHeader(http.StatusOK)
-		rw.Write(resp)
-
+		c.JSON(http.StatusOK, keys)
 		return
 	}
 }
@@ -226,13 +210,11 @@ func main() {
 			data = rest
 		}
 	}
+
 	myHandler := handler{Private: pkey, Public: pubkey}
-	s := &http.Server{
-		Addr:           ":8443",
-		Handler:        myHandler,
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
-		MaxHeaderBytes: 1 << 20,
-	}
-	log.Fatal(s.ListenAndServe())
+	router := gin.Default()
+	router.Any("/.well-known/*rest", func(c *gin.Context) {
+		myHandler.ServeHTTP(c)
+	})
+	router.Run()
 }
