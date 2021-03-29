@@ -20,24 +20,24 @@ import (
 )
 
 type jwtServer struct {
-	AuthorizationEndpoint            string `json:"authorization_endpoint"`
-	IdTokenSigningAlgValuesSupported []string
-	Issuer                           string
-	JwksURI                          string
-	ResponseTypeSupported            []string
-	SubjectTypesSupported            []string
-	TokenEndpoint                    string
-	Version                          string
-	X509URL                          string
+	AuthorizationEndpoint            string   `json:"authorization_endpoint"`
+	IdTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported"`
+	Issuer                           string   `json:"issuer"`
+	JwksURI                          string   `json:"jwks_uri"`
+	ResponseTypesSupported           []string `json:"response_types_supported"`
+	SubjectTypesSupported            []string `json:"subject_types_supported"`
+	TokenEndpoint                    string   `json:"token_endpoint"`
+	Version                          string   `json:"version"`
+	X509URL                          string   `json:"x509_url"`
 }
 
 type jwtPublicKey struct {
 	Type      string `json:"kty"`
 	Algorithm string `json:"alg"`
-	Use       string
+	Use       string `json:"use"`
 	ID        string `json:"kid"`
-	N         string // N from the RSA public key
-	E         string // E from the RSA public key
+	N         string `json:"n"`
+	E         string `json:"e"`
 }
 
 type jwtPrivateKey struct {
@@ -135,6 +135,7 @@ func main() {
 		ebytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(ebytes, uint32(priv.PublicKey.E))
 		pubkey = jwtPublicKey{N: base64.StdEncoding.EncodeToString(nbytes),
+			Algorithm: "RSA512", Type: "RSA", Use: "sig", ID: "us-wood-1",
 			E: base64.StdEncoding.EncodeToString(ebytes)}
 		serialNumber, err := rand.Int(rand.Reader,
 			new(big.Int).Lsh(big.NewInt(1), 128))
@@ -205,6 +206,7 @@ func main() {
 				ebytes := make([]byte, 4)
 				binary.BigEndian.PutUint32(ebytes, uint32(pub.E))
 				pubkey = jwtPublicKey{N: base64.StdEncoding.EncodeToString(nbytes),
+					Algorithm: "RSA512", Type: "RSA", Use: "sig", ID: "us-wood-1",
 					E: base64.StdEncoding.EncodeToString(ebytes)}
 			}
 			data = rest
