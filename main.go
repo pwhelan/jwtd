@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	jwt "github.com/dgrijalva/jwt-go"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -31,6 +33,7 @@ type jwtServer struct {
 	X509URL                          string   `json:"x509_url"`
 }
 
+// https://ldapwiki.com/wiki/JWK%20Set
 type jwtPublicKey struct {
 	Type      string `json:"kty"`
 	Algorithm string `json:"alg"`
@@ -98,7 +101,7 @@ func (h handler) ServeHTTP(c *gin.Context) {
 		return
 	case "jwks_uri":
 		keys := struct {
-			Keys []jwtPublicKey
+			Keys []jwtPublicKey `json:"keys"`
 		}{
 			Keys: []jwtPublicKey{
 				h.Public,
@@ -112,9 +115,10 @@ func (h handler) ServeHTTP(c *gin.Context) {
 func main() {
 	var pkey jwtPrivateKey
 	var pubkey jwtPublicKey
+	var priv *rsa.PrivateKey
 
 	if _, err := os.Stat("cert.pem"); os.IsNotExist(err) {
-		priv, err := rsa.GenerateKey(rand.Reader, 2048)
+		priv, err = rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			panic(err)
 		}
@@ -135,7 +139,7 @@ func main() {
 		ebytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(ebytes, uint32(priv.PublicKey.E))
 		pubkey = jwtPublicKey{N: base64.StdEncoding.EncodeToString(nbytes),
-			Algorithm: "RSA512", Type: "RSA", Use: "sig", ID: "us-wood-1",
+			Algorithm: "RS512", Type: "RSA", Use: "sig", ID: "us-wood-1",
 			E: base64.StdEncoding.EncodeToString(ebytes)}
 		serialNumber, err := rand.Int(rand.Reader,
 			new(big.Int).Lsh(big.NewInt(1), 128))
@@ -192,7 +196,7 @@ func main() {
 			}
 			switch block.Type {
 			case "RSA PRIVATE KEY":
-				priv, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+				priv, err = x509.ParsePKCS1PrivateKey(block.Bytes)
 				if err != nil {
 					panic(err)
 				}
@@ -206,7 +210,7 @@ func main() {
 				ebytes := make([]byte, 4)
 				binary.BigEndian.PutUint32(ebytes, uint32(pub.E))
 				pubkey = jwtPublicKey{N: base64.StdEncoding.EncodeToString(nbytes),
-					Algorithm: "RSA512", Type: "RSA", Use: "sig", ID: "us-wood-1",
+					Algorithm: "RS512", Type: "RSA", Use: "sig", ID: "us-wood-1",
 					E: base64.StdEncoding.EncodeToString(ebytes)}
 			}
 			data = rest
@@ -215,8 +219,34 @@ func main() {
 
 	myHandler := handler{Private: pkey, Public: pubkey}
 	router := gin.Default()
+	router.Use(cors.Default())
 	router.Any("/.well-known/*rest", func(c *gin.Context) {
 		myHandler.ServeHTTP(c)
+	})
+	router.POST("/sign", func(c *gin.Context) {
+		claims := struct {
+			Foo string `json:"foo"`
+			jwt.StandardClaims
+		}{
+			"Bar",
+			jwt.StandardClaims{
+				ExpiresAt: time.Now().Add(60 * time.Minute).Unix(),
+				Issuer:    "https://jwt.mdj.cl",
+				Audience:  "us-fooka-1:542345234234324",
+				NotBefore: time.Now().Add(-30 * time.Second).Unix(),
+				Subject:   "us-fooka-1:592039803123098",
+				IssuedAt:  time.Now().Unix(),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS512, claims)
+		token.Header["kid"] = "us-wood-1"
+		signed, err := token.SignedString(priv)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError,
+				gin.H{"message": fmt.Sprintf("%s", err)})
+			return
+		}
+		c.String(http.StatusOK, signed)
 	})
 	router.Run()
 }
